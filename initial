@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comprehensive Carbon Footprint Calculator</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+  }
+  .header {
+    background-color: #4CAF50;
+    color: white;
+    padding: 10px 0;
+    text-align: center;
+  }
+  .container {
+    width: 70%; /* Set the width to 70% */
+    margin: 20px auto; /* Centers the container */
+    background-color: #fff;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+  .description, .privacy {
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  .privacy {
+    background-color: #eee;
+    padding: 10px;
+  }
+  /* Styles for input fields */
+  .calculator-input {
+    margin-bottom: 10px;
+  }
+  .calculator-input label {
+    display: block;
+    margin-bottom: 5px;
+  }
+  .calculator-input input {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #ddd;
+  }
+  /* Styles for the calculate button */
+  button {
+    padding: 10px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+  }
+  button:hover {
+    background-color: #45a049;
+  }
+  /* Styles for the results section */
+  .results {
+    border: 1px solid #ddd;
+    background-color: #f9f9f9;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  .result-item {
+    margin-bottom: 10px;
+  }
+  .footprint-display {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footprint-display div {
+    text-align: center;
+    padding: 10px;
+    flex-basis: 30%;
+  }
+  .offset-button {
+    padding: 10px 20px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+    text-align: center;
+  }
+  .offset-button:hover {
+    background-color: #45a049;
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Carbon Footprint Calculator</h1>
+</div>
+<div class="container">
+  <div class="description">
+    Show you care for the environment and communities across the World by using our Carbon Footprint Calculator. 
+    Calculate your carbon footprint and see how you can make a difference today.
+    <div class="privacy">
+      <strong>Data Privacy:</strong> Your privacy is important to us. The information you provide is solely used to calculate your carbon footprint and improve the services we offer to you. We commit to safeguarding your data and ensuring that it is not used for any other purposes.
+    </div>
+  <div class="calculator-input">
+            <label for="countrySelect">Select Your Country:</label>
+            <select id="countrySelect">
+                <!-- Add options for each country -->
+                <option value="US"> US </option>
+                <option value="China"> China </option>
+                <!-- Add more countries as needed -->
+            </select>
+        </div>
+  </div>
+
+  <!-- Input sections for transport, diet, living, and entertainment -->
+  <!-- Transport Section -->
+  <h2>Transport</h2>
+  <div class="calculator-input">
+    <label for="bus">Bus (miles):</label>
+    <input type="number" id="bus" value="0">
+    <label for="bicycle">Bicycle (miles):</label>
+    <input type="number" id="bicycle" value="0">
+    <label for="walking">Walking (miles):</label>
+    <input type="number" id="walking" value="0">
+    <label for="train">Train (miles):</label>
+    <input type="number" id="train" value="0">
+    <label for="plane">Plane (miles):</label>
+    <input type="number" id="plane" value="0">
+  </div>
+
+  <!-- Diet Section -->
+  <h2>Diet</h2>
+  <div class="calculator-input">
+    <label for="meat">Meat (kg):</label>
+    <input type="number" id="meat" value="0">
+    <label for="meat">Meat (kg):</label>
+    <input type="number" id="meat" value="0">
+    <label for="dairy">Dairy (kg):</label>
+    <input type="number" id="dairy" value="0">
+    <label for="eggs">Eggs (number):</label>
+    <input type="number" id="eggs" value="0">
+    <label for="vegetables">Vegetables (kg):</label>
+    <input type="number" id="vegetables" value="0">
+    <label for="grains">Grains (kg):</label>
+    <input type="number" id="grains" value="0">
+    <label for="rice">Rice (kg):</label>
+    <input type="number" id="rice" value="0">
+  </div>
+
+  <!-- Living Section -->
+  <h2>Living</h2>
+  <div class="calculator-input">
+    <label for="electricity">Electricity (kWh):</label>
+    <input type="number" id="electricity" value="0">
+    <label for="water">Water (liters):</label>
+    <input type="number" id="water" value="0">
+    <label for="gas">Natural Gas (cubic meters):</label>
+    <input type="number" id="gas" value="0">
+    <label for="clothes">Clothes (number of items):</label>
+    <input type="number" id="clothes" value="0">
+    <label for="furniture">Furniture (number of items):</label>
+    <input type="number" id="furniture" value="0">
+  </div>
+
+ <!-- Entertainment Section -->
+ <h2>Entertainment</h2>
+ <div class="calculator-input">
+   <label for="movies">Movies (times):</label>
+   <input type="number" id="movies" value="0">
+ </div>
+ <div class="calculator-input">
+   <label for="restaurants">Restaurants (times):</label>
+   <input type="number" id="restaurants" value="0">
+ </div>
+ <div class="calculator-input">
+   <label for="bars">Bars (times):</label>
+   <input type="number" id="bars" value="0">
+ </div>
+ <div class="calculator-input">
+   <label for="sports">Sports (hours):</label>
+   <input type="number" id="sports" value="0">
+ </div>
+ <div class="calculator-input">
+   <label for="cards">Card Games (hours):</label>
+   <input type="number" id="cards" value="0">
+ </div>
+
+
+  <button onclick="calculateFootprint()">Calculate Total Footprint</button>
+
+  <!-- Results Section -->
+  <div class="results" id="footprintResults">
+    <h2>Your Carbon Footprint Results</h2>
+    <div class="result-item">
+      <strong>Total to Offset:</strong> <span id="totalFootprint">0</span> metric tons of CO2e
+      <button class="offset-button" onclick="offsetNow()">Offset Now</button>
+    </div>
+    <div class="footprint-display">
+      <div>
+        <h3>Your Footprint</h3>
+        <p id="userFootprint">0 metric tons per year</p>
+ 	  <div class="footprint-breakdown">
+            <h3>Footprint Breakdown</h3>
+            <p id="transportFootprint">Transport: 43.5%</p>
+            <p id="dietFootprint">Diet: 21.4%</p>
+            <p id="livingFootprint">Living: 18.3%</p>
+            <p id="entertainmentFootprint">Entertainment: 16.8%</p>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h3>Country Average</h3>
+        <p id="countryAverage">15.24 metric tons</p>
+      </div>
+      <div>
+        <h3>World Average</h3>
+        <p id="worldAverage">4.79 metric tons</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // JavaScript function to calculate the total carbon footprint
+  function calculateFootprint() {
+    // Gather the input values and calculate the footprint
+    // This is a placeholder for actual calculation logic
+    var busMiles = parseFloat(document.getElementById('bus').value);
+    var meatKg = parseFloat(document.getElementById('meat').value);
+    // ... gather other input values ...
+
+    // Example of calculation logic with assumed emission factors
+    var transportEmissions = busMiles * 0.1; // example factor
+    var dietEmissions = meatKg * 27; // example factor
+    // ... calculate emissions for other sections ...
+
+    var totalFootprint = transportEmissions + dietEmissions; // ... include other emissions ...
+
+    // Display the results
+    document.getElementById('totalFootprint').textContent = totalFootprint.toFixed(2);
+    document.getElementById('userFootprint').textContent = totalFootprint.toFixed(2) + " metric tons per year";
+    // ... update other result fields if necessary ...
+  }
+
+  function offsetNow() {
+    // Placeholder function to handle carbon offsetting
+    alert('Redirecting to offset service...');
+  }
+</script>
+</body>
+</html>
