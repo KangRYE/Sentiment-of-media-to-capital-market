@@ -1,0 +1,337 @@
+import os
+import pandas as pd
+import numpy as np
+from statsmodels.tsa.api import VAR
+import seaborn as sns
+from matplotlib.font_manager import FontProperties
+import time
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+
+# 替换为你的字体文件的实际路径
+font_path = '/Users/kangzhiyao/Downloads/wenquanyi-zen-hei/wqy-zenhei_2.ttf'
+
+# 添加字体到 font_manager
+font_manager.fontManager.addfont(font_path)
+
+# 获取字体名称
+font_name = font_manager.FontProperties(fname=font_path).get_name()
+
+# 设置全局字体
+plt.rcParams['font.family'] = font_name
+# 记录开始时间
+start_time = time.time()
+
+# 配置中文字体和输出文件夹
+plt.rcParams['font.sans-serif'] = ['WenQuanYi Zen Hei']
+plt.rcParams['axes.unicode_minus'] = False
+# 设置图片清晰度
+plt.rcParams['figure.dpi'] = 300
+# 设置全局字体大小（适合大字号插图）
+plt.rcParams.update({'font.size': 16})
+# 使用黑白风格
+plt.style.use('grayscale')
+
+output_folder = '/Users/kangzhiyao/desktop/毕业论文/代码/output/面板VAR结果/'
+os.makedirs(output_folder, exist_ok=True)
+
+# 加载数据
+file_path = '/Users/kangzhiyao/var/output/面板VAR长格式数据.csv'
+df = pd.read_csv(file_path)
+
+# 将日期列转换为日期类型
+df['date'] = pd.to_datetime(df['date'])
+
+# 定义变量列表（修改为英文别名）
+market_vars = ['收盘价', '振幅', '成交额']
+market_aliases = {'收盘价': 'Price', '振幅': 'Volatility', '成交额': 'Volume'}
+media_vars = ['Post', 'WSI', 'SDI']
+all_vars = [market_aliases[var] for var in market_vars] + media_vars
+media_types = ['综合媒体', '财经媒体', '财经论坛', '社交媒体']
+
+# 创建结果汇总表
+granger_summary = pd.DataFrame(
+    columns=['媒体类型', '因变量', '自变量', 'F统计量', 'p值', '是否存在因果关系', '显著性标注'])
+fevd_summary = pd.DataFrame(columns=['媒体类型', '变量', '期数'] + all_vars)
+# 增加置信区间列
+irf_results = pd.DataFrame(columns=['媒体类型', 'Response', 'Shock', 'Horizon', 'IRF', 'IRF_lower', 'IRF_upper'])
+
+# 定义不同的填充样式和灰度
+hatch_styles = ['', '', '', '/', '//', '\\']
+gray_levels = [0.2, 0.4, 0.8, 0.2, 0.4, 0.8]
+
+# 遍历四种媒体类型进行分析
+for media_type in media_types:
+    print(f"\n=== 分析 {media_type} ===")
+
+    # 筛选当前媒体类型的数据
+    media_df = df[df['媒体类型'] == media_type].sort_values('date')
+    media_df = media_df.set_index('date')  # 设置时间序列索引
+
+    # 替换市场变量别名
+    media_df = media_df.rename(columns=market_aliases)
+
+    # 准备VAR模型数据
+    var_data = media_df[all_vars].copy()
+
+    # 检查数据是否有缺失值
+    if var_data.isnull().any().any():
+        print(f"警告：{media_type}数据中存在缺失值，将进行插值处理")
+        var_data = var_data.interpolate(method='linear').ffill().bfill()
+
+    # 构建VAR模型
+    model = VAR(var_data)
+
+    # 选择最优滞后阶数（最大10阶）
+    lag_order_results = model.select_order(maxlags=10)
+    lag_order = lag_order_results.aic
+    print(f"最优滞后阶数(AIC): {lag_order}")
+
+    # 拟合模型
+    results = model.fit(lag_order)
+    print(f"模型稳定性: {'稳定' if results.is_stable() else '不稳定'}")
+
+    # 保存模型摘要
+    with open(f"{output_folder}/{media_type}_VAR模型摘要.txt", 'w', encoding='utf-8') as f:
+        f.write(str(results.summary()))
+
+    # 1. 格兰杰因果检验
+    print(f"\n{media_type} - 格兰杰因果检验:")
+    granger_results = []
+
+    for caused_var in all_vars:
+        for causal_var in all_vars:
+            if caused_var != causal_var:
+                test_result = results.test_causality(caused_var, [causal_var], kind='f')
+                is_significant = test_result.pvalue < 0.05
+                significance_label = '*' if is_significant else ''
+
+                print(
+                    f"  {causal_var} -> {caused_var}: F={test_result.test_statistic:.4f}, p={test_result.pvalue:.4f}, {'显著' if is_significant else '不显著'}")
+
+                # 添加到汇总表
+                new_granger_row = pd.DataFrame({
+                    '媒体类型': [media_type],
+                    '因变量': [caused_var],
+                    '自变量': [causal_var],
+                    'F统计量': [round(test_result.test_statistic, 4)],
+                    'p值': [round(test_result.pvalue, 4)],
+                    '是否存在因果关系': ['是' if is_significant else '否'],
+                    '显著性标注': [significance_label]
+                })
+                granger_summary = pd.concat([granger_summary, new_granger_row], ignore_index=True)
+
+    # 保存格兰杰因果检验结果
+    granger_df = granger_summary[granger_summary['媒体类型'] == media_type]
+    granger_df.to_csv(f"{output_folder}/{media_type}_格兰杰因果检验.csv", index=False, encoding='utf-8-sig')
+
+    # 创建热力图展示格兰杰因果关系
+    granger_matrix = pd.pivot_table(
+        granger_df,
+        values='p值',
+        index='自变量',
+        columns='因变量'
+    )
+
+    plt.figure(figsize=(8.27, 11.69))  # A4纸大小(竖版)
+    mask = np.zeros_like(granger_matrix, dtype=bool)
+    np.fill_diagonal(mask, True)  # 对角线不显示
+
+    sns.heatmap(
+        granger_matrix,
+        annot=True,
+        cmap='gray',  # 黑白灰度图
+        mask=mask,
+        vmin=0,
+        vmax=0.1,
+        linewidths=0.5,
+        fmt='.4f'
+    )
+    plt.title(f"{media_type} - 格兰杰因果检验 p值热力图", fontsize=18)
+    plt.tight_layout()
+    plt.savefig(f"{output_folder}/{media_type}_格兰杰因果热力图.png", dpi=300)
+    plt.close()
+
+    # 2. 方差分解分析
+    print(f"\n{media_type} - 方差分解分析:")
+    fevd = results.fevd(10)  # 10期方差分解
+
+    # 保存方差分解结果
+    for var in all_vars:
+        var_fevd = fevd.decomp[all_vars.index(var)]
+        for i in range(10):
+            row_data = {
+                '媒体类型': media_type,
+                '变量': var,
+                '期数': i + 1
+            }
+            for j, contrib_var in enumerate(all_vars):
+                row_data[contrib_var] = var_fevd[i, j]
+
+            new_row = pd.DataFrame([row_data])
+            fevd_summary = pd.concat([fevd_summary, new_row], ignore_index=True)
+
+    # 保存方差分解结果为CSV
+    fevd_df = fevd_summary[fevd_summary['媒体类型'] == media_type]
+    fevd_df.to_csv(f"{output_folder}/{media_type}_方差分解.csv", index=False, encoding='utf-8-sig')
+
+    # 绘制方差分解图
+    plt.figure(figsize=(8.27, 11.69))
+    for i, var in enumerate(all_vars):
+        ax = plt.subplot(3, 2, i + 1)
+        for j, contrib_var in enumerate(all_vars):
+            color_index = j % len(gray_levels)
+            hatch_index = j % len(hatch_styles)
+            ax.bar(range(10), fevd.decomp[i][:, j], bottom=None, hatch=hatch_styles[hatch_index],
+                   color=str(gray_levels[color_index]), edgecolor='black', label=contrib_var)
+        ax.set_title(f"{var}的方差分解", fontsize=16)
+        ax.set_xlabel('期数', fontsize=14)
+        ax.set_ylabel('贡献比例', fontsize=14)
+        ax.grid(False)
+        ax.legend(fontsize=12)
+
+    plt.suptitle(f"{media_type} - 方差分解分析", fontsize=20, y=1.02)
+    plt.tight_layout()
+    plt.savefig(f"{output_folder}/{media_type}_方差分解图.png", dpi=300)
+    plt.close()
+
+    # 3. 脉冲响应分析
+    print(f"\n{media_type} - 脉冲响应分析:")
+    irf = results.irf(10)  # 10期脉冲响应
+
+    # 计算置信区间（使用bootstrap方法，nrep可调整）
+    lower, upper = irf.errband_mc(signif=0.05, repl=500)
+
+    # 保存脉冲响应结果，增加置信区间
+    for i, resp_var in enumerate(all_vars):
+        for j, shock_var in enumerate(all_vars):
+            for k in range(10):
+                new_irf_row = pd.DataFrame({
+                    '媒体类型': [media_type],
+                    'Response': [resp_var],
+                    'Shock': [shock_var],
+                    'Horizon': [k + 1],
+                    'IRF': [float(irf.irfs[k, i, j])],
+                    'IRF_lower': [float(lower[k, i, j])],
+                    'IRF_upper': [float(upper[k, i, j])]
+                })
+                irf_results = pd.concat([irf_results, new_irf_row], ignore_index=True)
+
+    # 保存脉冲响应结果为CSV
+    irf_df = irf_results[irf_results['媒体类型'] == media_type]
+    irf_df.to_csv(f"{output_folder}/{media_type}_脉冲响应函数.csv", index=False, encoding='utf-8-sig')
+
+    # 绘制脉冲响应图
+    plt.figure(figsize=(8.27, 11.69))
+    for i, shock_var in enumerate(all_vars):
+        for j, resp_var in enumerate(all_vars):
+            plt.subplot(6, 6, i * 6 + j + 1)
+
+            current_irf = irf_df[(irf_df['Shock'] == shock_var) & (irf_df['Response'] == resp_var)]
+            # 确保数据为数值类型
+            current_irf = current_irf.apply(pd.to_numeric, errors='coerce')
+            current_irf = current_irf.dropna()
+
+            if not current_irf.empty:
+                plt.plot(current_irf['Horizon'], current_irf['IRF'], marker='o', markersize=5, color='black', label='IRF')
+                plt.fill_between(current_irf['Horizon'], current_irf['IRF_lower'], current_irf['IRF_upper'],
+                                 color='lightgray', alpha=0.5, label='95% CI')
+                plt.axhline(y=0, color='black', linestyle='-', alpha=0.7)
+                plt.title(f"{shock_var} → {resp_var}", fontsize=16)
+                plt.xlabel('期数', fontsize=14)
+                plt.ylabel('响应', fontsize=14)
+                ax.grid(False)
+                plt.xticks(fontsize=12)
+                plt.yticks(fontsize=12)
+
+    plt.suptitle(f"{media_type} - 脉冲响应函数", fontsize=20, y=1.02)
+    plt.tight_layout()
+    plt.savefig(f"{output_folder}/{media_type}_脉冲响应函数图.png", dpi=300)
+    plt.close()
+
+# 保存汇总结果
+granger_summary.to_csv(f"{output_folder}/所有媒体类型_格兰杰因果检验汇总.csv", index=False, encoding='utf-8-sig')
+fevd_summary.to_csv(f"{output_folder}/所有媒体类型_方差分解汇总.csv", index=False, encoding='utf-8-sig')
+irf_results.to_csv(f"{output_folder}/所有媒体类型_脉冲响应函数汇总.csv", index=False, encoding='utf-8-sig')
+
+# 创建媒体类型间的比较图表
+# 1. 格兰杰因果关系显著性比较
+sig_counts = granger_summary[granger_summary['是否存在因果关系'] == '是'].groupby(
+    ['媒体类型', '自变量']).size().unstack(fill_value=0)
+plt.figure(figsize=(8.27, 11.69))
+sig_counts.plot(kind='bar', figsize=(8.27, 11.69))
+plt.title('不同媒体类型的格兰杰因果关系显著性比较', fontsize=20)
+plt.xlabel('媒体类型', fontsize=18)
+plt.ylabel('显著因果关系数量', fontsize=18)
+plt.xticks(rotation=45, fontsize=14)
+plt.yticks(fontsize=14)
+ax.grid(False)
+plt.tight_layout()
+plt.savefig(f"{output_folder}/媒体类型格兰杰因果比较.png", dpi=300)
+plt.close()
+
+# 2. 脉冲响应函数比较 - 市场指标对媒体指标的影响
+plt.figure(figsize=(8.27, 11.69))
+for i, market_var in enumerate(market_aliases.values()):
+    for j, media_var in enumerate(media_vars):
+        plt.subplot(3, 3, i * 3 + j + 1)
+
+        for media_type in media_types:
+            current_irf = irf_results[
+                (irf_results['媒体类型'] == media_type) &
+                (irf_results['Shock'] == market_var) &
+                (irf_results['Response'] == media_var)
+            ]
+            # 确保数据为数值类型
+            current_irf = current_irf.apply(pd.to_numeric, errors='coerce')
+            current_irf = current_irf.dropna()
+
+            if not current_irf.empty:
+                plt.plot(current_irf['Horizon'], current_irf['IRF'], marker='o', markersize=5, label=media_type)
+                plt.fill_between(current_irf['Horizon'], current_irf['IRF_lower'], current_irf['IRF_upper'],
+                                 color='lightgray', alpha=0.5)
+
+        plt.axhline(y=0, color='black', linestyle='-', alpha=0.7)
+        plt.title(f"{market_var} → {media_var}", fontsize=16)
+        plt.xlabel('期数', fontsize=14)
+        plt.ylabel('响应', fontsize=14)
+        ax.grid(False)
+        plt.legend(fontsize=12)
+
+plt.suptitle('市场指标对媒体指标的影响比较', fontsize=20, y=1.02)
+plt.tight_layout()
+plt.savefig(f"{output_folder}/市场对媒体影响比较.png", dpi=300)
+plt.close()
+
+# 3. 脉冲响应函数比较 - 媒体指标对市场指标的影响
+plt.figure(figsize=(8.27, 11.69))
+for i, media_var in enumerate(media_vars):
+    for j, market_var in enumerate(market_aliases.values()):
+        plt.subplot(3, 3, i * 3 + j + 1)
+
+        for media_type in media_types:
+            current_irf = irf_results[
+                (irf_results['媒体类型'] == media_type) &
+                (irf_results['Shock'] == media_var) &
+                (irf_results['Response'] == market_var)
+            ]
+            # 确保数据为数值类型
+            current_irf = current_irf.apply(pd.to_numeric, errors='coerce')
+            current_irf = current_irf.dropna()
+
+            if not current_irf.empty:
+                plt.plot(current_irf['Horizon'], current_irf['IRF'], marker='o', markersize=5, label=media_type)
+                plt.fill_between(current_irf['Horizon'], current_irf['IRF_lower'], current_irf['IRF_upper'],
+                                 color='lightgray', alpha=0.5)
+
+        plt.axhline(y=0, color='black', linestyle='-', alpha=0.7)
+        plt.title(f"{media_var} → {market_var}", fontsize=16)
+        plt.xlabel('期数', fontsize=14)
+        plt.ylabel('响应', fontsize=14)
+        ax.grid(False)
+        plt.legend(fontsize=12)
+
+plt.suptitle('媒体指标对市场指标的影响比较', fontsize=20, y=1.02)
+plt.tight_layout()
+plt.savefig(f"{output_folder}/媒体对市场影响比较.png", dpi=300)
+plt.close()
