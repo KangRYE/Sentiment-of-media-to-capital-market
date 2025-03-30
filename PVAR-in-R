@@ -1,0 +1,294 @@
+#--------------------------------------------------#
+#      R 代码：面板VAR分析（整体效应）
+#--------------------------------------------------#
+
+# 1. 设置清华镜像
+options(repos = c(CRAN = "https://mirrors.tuna.tsinghua.edu.cn/CRAN/"))
+
+# 2. 定义必要包列表
+necessary_packages <- c("plm", "vars", "readxl", "ggplot2", "reshape2")
+
+# 3. 安装并加载包
+for (pkg in necessary_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg, type = "binary")
+    library(pkg, character.only = TRUE)
+  } else {
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# 4. 读取数据
+panel_data <- read.csv("面板VAR长格式数据.csv",
+                      header = TRUE,
+                      stringsAsFactors = FALSE)
+
+# 处理日期列
+if (class(panel_data$date) == "factor") {
+  panel_data$date <- as.character(panel_data$date)
+}
+panel_data$date <- as.Date(panel_data$date, format = "%Y/%m/%d")
+
+# 5. 构建面板数据结构
+panel_data$platform <- as.factor(panel_data$platform)
+pdata <- pdata.frame(panel_data, index = c("platform", "date"))
+
+# 定义变量列表
+dep_vars <- c("Price", "Volatility", "Volume", "Post", "WSI", "SDI")
+
+# 6. 去除个体固定效应
+for(var in dep_vars) {
+  pdata[[var]] <- within_transform(pdata[[var]], effect = "individual")
+}
+
+# 7. 选择最佳滞后阶数
+max_lag <- 10
+lag_criteria <- list()
+
+for(lag in 1:max_lag) {
+  cat("计算滞后", lag, "阶的信息准则\n")
+  
+  # 创建滞后变量
+  lag_data <- pdata
+  for(var in dep_vars) {
+    for(l in 1:lag) {
+      lag_var_name <- paste0(var, "_lag", l)
+      lag_data[[lag_var_name]] <- lag(lag_data[[var]], l)
+    }
+  }
+  
+  # 移除NA值
+  lag_data <- na.omit(lag_data)
+  
+  # 估计方程组
+  equations <- list()
+  resids <- matrix(NA, nrow = nrow(lag_data), ncol = length(dep_vars))
+  
+  for(i in 1:length(dep_vars)) {
+    formula_terms <- paste(paste0(dep_vars, "_lag1"), collapse = " + ")
+    for(l in 2:lag) {
+      formula_terms <- paste(formula_terms, "+", 
+                           paste(paste0(dep_vars, "_lag", l), collapse = " + "))
+    }
+    formula_str <- paste(dep_vars[i], "~", formula_terms)
+    
+    model <- plm(as.formula(formula_str), data = lag_data, model = "within")
+    equations[[dep_vars[i]]] <- model
+    resids[,i] <- residuals(model)
+  }
+  
+  # 计算信息准则
+  n_obs <- nrow(resids)
+  n_params <- lag * length(dep_vars)^2
+  sigma <- crossprod(resids) / n_obs
+  log_det <- determinant(sigma, logarithm = TRUE)$modulus
+  
+  lag_criteria[[lag]] <- list(
+    aic = n_obs * log_det + 2 * n_params,
+    bic = n_obs * log_det + log(n_obs) * n_params
+  )
+}
+
+# 选择最佳滞后阶
+aic_values <- sapply(lag_criteria, function(x) x$aic)
+bic_values <- sapply(lag_criteria, function(x) x$bic)
+best_lag_aic <- which.min(aic_values)
+best_lag_bic <- which.min(bic_values)
+
+cat("\nAIC最佳滞后阶：", best_lag_aic, "\n")
+cat("BIC最佳滞后阶：", best_lag_bic, "\n")
+
+# 使用AIC选择的最佳滞后阶
+best_lag <- best_lag_aic
+
+# 8. 估计最终的面板VAR模型
+final_data <- pdata
+for(var in dep_vars) {
+  for(l in 1:best_lag) {
+    lag_var_name <- paste0(var, "_lag", l)
+    final_data[[lag_var_name]] <- lag(final_data[[var]], l)
+  }
+}
+final_data <- na.omit(final_data)
+
+# 估计最终方程组
+final_equations <- list()
+final_resids <- matrix(NA, nrow = nrow(final_data), ncol = length(dep_vars))
+colnames(final_resids) <- dep_vars
+
+for(i in 1:length(dep_vars)) {
+  formula_terms <- paste(paste0(dep_vars, "_lag1"), collapse = " + ")
+  for(l in 2:best_lag) {
+    formula_terms <- paste(formula_terms, "+", 
+                         paste(paste0(dep_vars, "_lag", l), collapse = " + "))
+  }
+  formula_str <- paste(dep_vars[i], "~", formula_terms)
+  
+  final_equations[[dep_vars[i]]] <- plm(as.formula(formula_str), 
+                                      data = final_data, 
+                                      model = "within")
+  final_resids[,i] <- residuals(final_equations[[dep_vars[i]]])
+}
+
+# 9. Granger因果检验
+granger_results <- matrix(NA, nrow = length(dep_vars), ncol = length(dep_vars))
+rownames(granger_results) <- dep_vars
+colnames(granger_results) <- dep_vars
+
+for(i in 1:length(dep_vars)) {
+  for(j in 1:length(dep_vars)) {
+    if(i != j) {
+      # 无限制模型
+      unrestricted <- final_equations[[dep_vars[i]]]
+      
+      # 限制模型（排除变量j的所有滞后项）
+      restricted_vars <- dep_vars[-j]
+      formula_terms <- paste(paste0(restricted_vars, "_lag1"), collapse = " + ")
+      for(l in 2:best_lag) {
+        formula_terms <- paste(formula_terms, "+", 
+                             paste(paste0(restricted_vars, "_lag", l), 
+                                  collapse = " + "))
+      }
+      formula_str <- paste(dep_vars[i], "~", formula_terms)
+      restricted <- plm(as.formula(formula_str), data = final_data, 
+                       model = "within")
+      
+      # F检验
+      f_test <- pFtest(unrestricted, restricted)
+      granger_results[i,j] <- f_test$p.value
+    }
+  }
+}
+
+# 10. 计算脉冲响应函数
+# 使用VAR系数矩阵计算脉冲响应
+coef_matrix <- matrix(0, nrow = length(dep_vars), 
+                     ncol = length(dep_vars) * best_lag)
+for(i in 1:length(dep_vars)) {
+  coefs <- coef(final_equations[[dep_vars[i]]])
+  for(l in 1:best_lag) {
+    idx <- ((l-1) * length(dep_vars) + 1):(l * length(dep_vars))
+    coef_matrix[i,idx] <- coefs[idx]
+  }
+}
+
+# 计算10期的脉冲响应
+horizon <- 10
+irf_results <- array(0, dim = c(length(dep_vars), length(dep_vars), horizon))
+dimnames(irf_results) <- list(dep_vars, dep_vars, 1:horizon)
+
+# 初始冲击
+for(i in 1:length(dep_vars)) {
+  shock <- rep(0, length(dep_vars))
+  shock[i] <- 1
+  irf_results[,i,1] <- shock
+  
+  # 计算后续期间的响应
+  for(h in 2:horizon) {
+    for(l in 1:min(h-1, best_lag)) {
+      idx <- ((l-1) * length(dep_vars) + 1):(l * length(dep_vars))
+      irf_results[,i,h] <- irf_results[,i,h] + 
+        coef_matrix[,idx] %*% irf_results[,i,h-l]
+    }
+  }
+}
+
+# 11. 方差分解
+fevd_results <- array(0, dim = c(length(dep_vars), length(dep_vars), horizon))
+dimnames(fevd_results) <- list(dep_vars, dep_vars, 1:horizon)
+
+# 计算预测误差方差
+sigma <- crossprod(final_resids) / nrow(final_resids)
+chol_sigma <- t(chol(sigma))
+
+for(i in 1:length(dep_vars)) {
+  total_var <- 0
+  for(h in 1:horizon) {
+    # 计算h期预测误差的方差
+    var_h <- matrix(0, nrow = length(dep_vars), ncol = length(dep_vars))
+    for(s in 1:h) {
+      if(s == 1) {
+        impact <- diag(length(dep_vars))
+      } else {
+        impact <- matrix(0, nrow = length(dep_vars), ncol = length(dep_vars))
+        for(l in 1:min(s-1, best_lag)) {
+          idx <- ((l-1) * length(dep_vars) + 1):(l * length(dep_vars))
+          impact <- impact + coef_matrix[,idx] %*% 
+            irf_results[,,s-l]
+        }
+      }
+      var_h <- var_h + impact %*% chol_sigma %*% t(impact)
+    }
+    
+    # 计算方差分解
+    total_var <- diag(var_h)
+    fevd_results[i,,h] <- diag(var_h) / sum(diag(var_h))
+  }
+}
+
+# 12. 可视化结果
+# Granger因果关系热图
+granger_df <- as.data.frame(granger_results)
+granger_df$Cause <- rownames(granger_df)
+granger_long <- reshape2::melt(granger_df, id.vars = "Cause", 
+                              variable.name = "Effect", 
+                              value.name = "p_value")
+granger_long$significant <- ifelse(granger_long$p_value < 0.05, "是", "否")
+
+p1 <- ggplot(granger_long, aes(x = Cause, y = Effect, fill = p_value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                      midpoint = 0.05, limits = c(0, 1)) +
+  geom_text(aes(label = ifelse(significant == "是", "*", "")), 
+            color = "black", size = 5) +
+  theme_minimal() +
+  labs(title = "面板VAR Granger因果关系热图",
+       x = "原因变量",
+       y = "结果变量",
+       fill = "p值") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p1)
+
+# 脉冲响应图
+for(i in 1:length(dep_vars)) {
+  for(j in 1:length(dep_vars)) {
+    response <- irf_results[i,j,]
+    plot(1:horizon, response, type = "l",
+         main = paste(dep_vars[j], "对", dep_vars[i], "的脉冲响应"),
+         xlab = "期数", ylab = "响应")
+    abline(h = 0, lty = 2)
+  }
+}
+
+# 方差分解图
+for(i in 1:length(dep_vars)) {
+  barplot(t(fevd_results[i,,]), 
+          main = paste(dep_vars[i], "的方差分解"),
+          xlab = "期数", ylab = "贡献比例",
+          col = rainbow(length(dep_vars)),
+          legend.text = dep_vars,
+          args.legend = list(x = "topright"))
+}
+
+# 13. 保存结果
+# 获取数据文件所在目录
+data_path <- "面板VAR长格式数据.csv"
+result_dir <- dirname(data_path)
+
+# 保存图形
+ggsave(filename = file.path(result_dir, "面板VAR_Granger因果关系热图.pdf"), 
+       plot = p1, width = 10, height = 8)
+
+# 保存数据结果
+save(final_equations, granger_results, irf_results, fevd_results,
+     file = file.path(result_dir, "面板VAR分析结果.RData"))
+
+# 保存Granger检验结果到CSV
+write.csv(granger_results, 
+          file = file.path(result_dir, "面板VAR_Granger检验结果.csv"))
+
+# 保存方差分解结果到CSV
+fevd_df <- as.data.frame(fevd_results)
+write.csv(fevd_df, 
+          file = file.path(result_dir, "面板VAR_方差分解结果.csv"))
